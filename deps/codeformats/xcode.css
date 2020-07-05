@@ -90,3 +90,11 @@ span.right_diff_del {
 span.clearbg {
   background-color: transparent;
 }
+span.lineno_coverage_hit {
+  background-color: #a6e22e;
+  display: block
+}
+span.lineno_coverage_miss {
+  background-color: #a31515;
+  display: block
+}

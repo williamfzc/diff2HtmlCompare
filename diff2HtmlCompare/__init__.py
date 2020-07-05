@@ -115,6 +115,26 @@ HTML_TEMPLATE = """
 </html>
 """
 
+def coverage_xml_parse(xml_file_path, src_file_path):
+    from diff_cover.violationsreporters.violations_reporter import XmlCoverageReporter
+    from diff_cover.git_path import GitPathTool
+
+    try:
+        # Needed for Python < 3.3, works up to 3.8
+        import xml.etree.cElementTree as etree
+    except ImportError:
+        # Python 3.9 onwards
+        import xml.etree.ElementTree as etree
+
+    GitPathTool.set_cwd(None)
+    xml_roots = [etree.parse(xml_root) for xml_root in [xml_file_path]]
+    coverage = XmlCoverageReporter(xml_roots, [os.path.dirname(src_file_path)])
+    coverage._cache_file(src_file_path)
+    return coverage._info_cache[src_file_path]
+
+
+coverage_line_list = None
+
 
 class DefaultLexer(RegexLexer):
     """
@@ -152,6 +172,14 @@ class DiffHtmlFormatter(HtmlFormatter):
         retlinenos = []
         for idx, ((left_no, left_line), (right_no, right_line), change) in enumerate(self.diffs):
             no = None
+
+            # no coverage xml, do not draw
+            # None and [] is different here
+            # coverage will only make sense in right side
+            need_coverage_draw = bool(coverage_line_list is not None)
+            coverage_class_miss = "lineno_coverage_miss"
+            coverage_class_hit = "lineno_coverage_hit"
+
             if self.isLeft:
                 if change:
                     if isinstance(left_no, int) and isinstance(right_no, int):
@@ -168,15 +196,27 @@ class DiffHtmlFormatter(HtmlFormatter):
                 # add coverage here
                 if change:
                     if isinstance(left_no, int) and isinstance(right_no, int):
-                        no = '<span class="lineno_q lineno_rightchange">' + \
+                        no = '<span class="lineno_q lineno_rightchange {cov}">' + \
                             str(right_no) + "</span>"
                     elif isinstance(left_no, int) and not isinstance(right_no, int):
-                        no = '<span class="lineno_q lineno_rightdel">  </span>'
+                        no = '<span class="lineno_q lineno_rightdel {cov}">  </span>'
                     elif not isinstance(left_no, int) and isinstance(right_no, int):
-                        no = '<span class="lineno_q lineno_rightadd">' + \
+                        no = '<span class="lineno_q lineno_rightadd {cov}">' + \
                             str(right_no) + "</span>"
                 else:
-                    no = '<span class="lineno_q">' + str(right_no) + "</span>"
+                    no = '<span class="lineno_q {cov}">' + str(right_no) + "</span>"
+
+                # coverage
+                if need_coverage_draw and change:
+                    # coverage line list will not contain empty lines
+                    # and something like function signature
+                    content = right_line.strip()
+                    if (not content) or content.startswith("#"):
+                        pass
+                    elif right_no in coverage_line_list:
+                        no = no.format(cov=coverage_class_hit)
+                    else:
+                        no = no.format(cov=coverage_class_miss)
 
             retlinenos.append(no)
 
@@ -417,11 +457,17 @@ def cmd():
     parser.add_argument('-c', '--syntax-css', action='store', default="vs",
                         help='Pygments CSS for code syntax highlighting. Can be one of: %s' % str(PYGMENTS_STYLES))
     parser.add_argument('-o', '--output-path', action='store')
+    parser.add_argument('-cov', '--coverage', action='store')
     parser.add_argument('-v', '--verbose', action='store_true', help='show verbose output.')
     parser.add_argument('file1', help='source file to compare ("before" file).')
     parser.add_argument('file2', help='source file to compare ("after" file).')
 
     args = parser.parse_args()
+
+    if args.coverage:
+        r = coverage_xml_parse(args.coverage, args.file2)
+        global coverage_line_list
+        coverage_line_list = r[1]
 
     if args.syntax_css not in PYGMENTS_STYLES:
         raise ValueError("Syntax CSS (-c) must be one of %r." % PYGMENTS_STYLES)
